@@ -17,32 +17,40 @@ public class SimulateBattleImpl implements SimulateBattle {
 
     @Override
     public void simulate(Army playerArmy, Army computerArmy) throws InterruptedException {
-        // Max-score version + round logs (like the default implementation):
+        // "No surprises" version aligned to the task rules:
         // - Round-based combat.
-        // - Inside each round, turns are taken in descending baseAttack order (per army),
-        //   alternating player/computer. If one side has no units left to act, the other continues.
-        // - If a unit dies before it has acted in the current round, it must be excluded immediately,
-        //   and turn queues must be recalculated (we rebuild buckets).
-        // - printBattleLog is called after every attack attempt.
-        // - After each completed round prints "Round N is over!" + alive counters.
+        // - Each round: units are ordered by baseAttack descending.
+        // - Turns alternate between armies. If one army has no units left to act, the other continues.
+        // - If a unit dies before it has acted in the current round, it must be removed immediately
+        //   and turn order must be recalculated (we rebuild queues).
+        // - After every attack attempt we call printBattleLog.printBattleLog(attacker, target).
+        // - Battle ends ONLY when one side has no alive units remaining (same behavior as default).
+        // - Prints "Round N is over!" logs like the default implementation.
 
         if (playerArmy == null || computerArmy == null) return;
+
+        // If one of the armies is empty/already dead, nothing to simulate.
+        if (!hasAlive(playerArmy) || !hasAlive(computerArmy)) {
+            System.out.println("Battle is over!");
+            return;
+        }
 
         int round = 0;
 
         while (hasAlive(playerArmy) && hasAlive(computerArmy)) {
             round++;
 
+            // Units that have already acted in the current round (both armies)
             HashSet<Unit> actedThisRound = new HashSet<>();
-            boolean progressThisRound = false;
 
-            // Rebuild loop: if death happens to a unit that hasn't acted yet -> rebuild queues.
+            // Rebuild loop: if a not-yet-acted unit dies -> rebuild queues immediately.
             while (true) {
                 AttackBuckets pBuckets = buildBuckets(playerArmy, actedThisRound);
                 AttackBuckets cBuckets = buildBuckets(computerArmy, actedThisRound);
 
+                // If nobody left to act on both sides -> round ends.
                 if (pBuckets.isEmpty() && cBuckets.isEmpty()) {
-                    break; // round over
+                    break;
                 }
 
                 boolean needRebuild = false;
@@ -54,12 +62,9 @@ public class SimulateBattleImpl implements SimulateBattle {
                         Unit target = p.getProgram().attack();
                         log(p, target);
 
-                        // "Progress" = real attack on an enemy (not null and not self)
-                        if (target != null && target != p) progressThisRound = true;
-
                         actedThisRound.add(p);
 
-                        // If target died and had not acted yet, rebuild immediately
+                        // If the target died and it has not acted yet in this round -> rebuild queues.
                         if (target != null && !target.isAlive() && !actedThisRound.contains(target)) {
                             needRebuild = true;
                         }
@@ -72,8 +77,6 @@ public class SimulateBattleImpl implements SimulateBattle {
                     if (c != null) {
                         Unit target = c.getProgram().attack();
                         log(c, target);
-
-                        if (target != null && target != c) progressThisRound = true;
 
                         actedThisRound.add(c);
 
@@ -88,6 +91,7 @@ public class SimulateBattleImpl implements SimulateBattle {
                 if (!needRebuild) {
                     break; // round finished without needing recalculation
                 }
+                // else: rebuild queues and continue the same round
             }
 
             // Round log (like default)
@@ -97,14 +101,8 @@ public class SimulateBattleImpl implements SimulateBattle {
             System.out.println("Computer army has " + countAlive(computerArmy) + " units");
             System.out.println();
 
-            // If someone died out -> battle ends after round finishes (as required)
+            // Battle ends only when one army has no alive units.
             if (!hasAlive(playerArmy) || !hasAlive(computerArmy)) {
-                System.out.println("Battle is over!");
-                return;
-            }
-
-            // Stalemate: nobody can perform a meaningful move (no targets / no reachable targets)
-            if (!progressThisRound) {
                 System.out.println("Battle is over!");
                 return;
             }
@@ -114,7 +112,7 @@ public class SimulateBattleImpl implements SimulateBattle {
     }
 
     private static final class AttackBuckets {
-        // baseAttack -> units with this baseAttack (descending)
+        // baseAttack -> units with that attack value (descending order)
         private final TreeMap<Integer, ArrayDeque<Unit>> buckets =
                 new TreeMap<>(Comparator.reverseOrder());
 
