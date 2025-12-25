@@ -4,7 +4,7 @@
     <root id="archive" name="heroes_student_task.jar">
       <element id="module-output" name="heroes_student_task" />
       <element id="extracted-dir" path="$PROJECT_DIR$/libs/heroes_task_lib-1.0-SNAPSHOT.jar" path-in-jar="/" />
-      <element id="extracted-dir" path="$PROJECT_DIR$/../heroes/jars/obf.jar" path-in-jar="/" />
+      <element id="file-copy" path="$PROJECT_DIR$/../heroes/jars/obf_old.jar" />
     </root>
   </artifact>
 </component>

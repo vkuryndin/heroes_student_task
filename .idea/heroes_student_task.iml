@@ -11,7 +11,7 @@
     <orderEntry type="module-library">
       <library>
         <CLASSES>
-          <root url="jar://$MODULE_DIR$/../heroes/jars/obf.jar!/" />
+          <root url="jar://$MODULE_DIR$/../heroes/jars/obf_old.jar!/" />
         </CLASSES>
         <JAVADOC />
         <SOURCES />
