@@ -9,6 +9,7 @@ public class SuitableForAttackUnitsFinderImpl implements SuitableForAttackUnitsF
 
     @Override
     public List<Unit> getSuitableUnits(List<List<Unit>> unitsByRow, boolean isLeftArmyTarget) {
+        // Ваше решение
         System.out.println(">>> STUB: SuitableForAttackUnitsFinderImpl.getSuitableUnits() called");
         return List.of();
     }

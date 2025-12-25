@@ -9,6 +9,7 @@ import java.util.List;
 public class UnitTargetPathFinderImpl implements UnitTargetPathFinder {
     @Override
     public List<Edge> getTargetPath(Unit attackUnit, Unit targetUnit, List<Unit> existingUnitList) {
+        // Ваше решение
         System.out.println(">>> STUB: UnitTargetPathFinderImpl.getTargetPath() called");
         return List.of();
     }
