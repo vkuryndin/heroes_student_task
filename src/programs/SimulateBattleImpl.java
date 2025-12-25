@@ -5,129 +5,183 @@ import com.battle.heroes.army.Unit;
 import com.battle.heroes.army.programs.PrintBattleLog;
 import com.battle.heroes.army.programs.SimulateBattle;
 
+import java.util.ArrayDeque;
 import java.util.Comparator;
 import java.util.HashSet;
-import java.util.PriorityQueue;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 public class SimulateBattleImpl implements SimulateBattle {
-    private PrintBattleLog printBattleLog; // Provided by the game; use after each attack
+    private PrintBattleLog printBattleLog; // Must be used after each attack
 
     @Override
     public void simulate(Army playerArmy, Army computerArmy) throws InterruptedException {
-        // Battle rules (aligned with the default implementation intent):
-        // - Each round: build two turn queues (player/computer), ordered by baseAttack descending
-        // - Alternate turns: player then computer (if queue not empty)
-        // - Units that died before their turn in the current round must not act (queues are recalculated)
-        // - Stop if one army has no alive units, OR if a full round produced no effective actions
-        //   (to avoid infinite loops when nobody can reach/attack anyone).
+        // Max-score version + round logs (like the default implementation):
+        // - Round-based combat.
+        // - Inside each round, turns are taken in descending baseAttack order (per army),
+        //   alternating player/computer. If one side has no units left to act, the other continues.
+        // - If a unit dies before it has acted in the current round, it must be excluded immediately,
+        //   and turn queues must be recalculated (we rebuild buckets).
+        // - printBattleLog is called after every attack attempt.
+        // - After each completed round prints "Round N is over!" + alive counters.
 
         if (playerArmy == null || computerArmy == null) return;
 
+        int round = 0;
+
         while (hasAlive(playerArmy) && hasAlive(computerArmy)) {
+            round++;
+
             HashSet<Unit> actedThisRound = new HashSet<>();
-            boolean anyEffectiveActionThisRound = false;
+            boolean progressThisRound = false;
 
-            // The default code rebuilds queues when a unit dies before its turn.
-            // We emulate this behavior with a "rebuild" flag.
-            boolean needRebuild;
-            // Simulates combat round until rebuild not needed
-            do {
-                needRebuild = false;
+            // Rebuild loop: if death happens to a unit that hasn't acted yet -> rebuild queues.
+            while (true) {
+                AttackBuckets pBuckets = buildBuckets(playerArmy, actedThisRound);
+                AttackBuckets cBuckets = buildBuckets(computerArmy, actedThisRound);
 
-                PriorityQueue<Unit> playerQ = new PriorityQueue<>(Comparator.comparingInt(Unit::getBaseAttack).reversed());
-                PriorityQueue<Unit> computerQ = new PriorityQueue<>(Comparator.comparingInt(Unit::getBaseAttack).reversed());
-
-                // Add alive units that have not acted in this round yet.
-                for (Unit u : playerArmy.getUnits()) {
-                    if (u != null && u.isAlive() && !actedThisRound.contains(u)) {
-                        playerQ.add(u);
-                    }
-                }
-                for (Unit u : computerArmy.getUnits()) {
-                    if (u != null && u.isAlive() && !actedThisRound.contains(u)) {
-                        computerQ.add(u);
-                    }
+                if (pBuckets.isEmpty() && cBuckets.isEmpty()) {
+                    break; // round over
                 }
 
-                while (!playerQ.isEmpty() || !computerQ.isEmpty()) {
+                boolean needRebuild = false;
+
+                while (!pBuckets.isEmpty() || !cBuckets.isEmpty()) {
                     // Player turn
-                    if (!playerQ.isEmpty()) {
-                        Unit attacker = playerQ.poll();
-                        if (attacker != null && attacker.isAlive() && !actedThisRound.contains(attacker)) {
-                            Unit target = unitAttack(attacker);
+                    Unit p = pBuckets.pollNextAliveNotActed(actedThisRound);
+                    if (p != null) {
+                        Unit target = p.getProgram().attack();
+                        log(p, target);
 
-                            // Melee programs may return attacker itself when path is not found.
-                            if (target != null && target != attacker) {
-                                anyEffectiveActionThisRound = true;
-                            }
+                        // "Progress" = real attack on an enemy (not null and not self)
+                        if (target != null && target != p) progressThisRound = true;
 
-                            // If target died and hasn't acted yet this round, rebuild queues.
-                            if (target != null && !target.isAlive() && !actedThisRound.contains(target)) {
-                                needRebuild = true;
-                            }
+                        actedThisRound.add(p);
 
-                            actedThisRound.add(attacker);
-                            if (needRebuild) break;
+                        // If target died and had not acted yet, rebuild immediately
+                        if (target != null && !target.isAlive() && !actedThisRound.contains(target)) {
+                            needRebuild = true;
                         }
                     }
+
+                    if (needRebuild) break;
 
                     // Computer turn
-                    if (!computerQ.isEmpty()) {
-                        Unit attacker = computerQ.poll();
-                        if (attacker != null && attacker.isAlive() && !actedThisRound.contains(attacker)) {
-                            Unit target = unitAttack(attacker);
+                    Unit c = cBuckets.pollNextAliveNotActed(actedThisRound);
+                    if (c != null) {
+                        Unit target = c.getProgram().attack();
+                        log(c, target);
 
-                            if (target != null && target != attacker) {
-                                anyEffectiveActionThisRound = true;
-                            }
+                        if (target != null && target != c) progressThisRound = true;
 
-                            if (target != null && !target.isAlive() && !actedThisRound.contains(target)) {
-                                needRebuild = true;
-                            }
+                        actedThisRound.add(c);
 
-                            actedThisRound.add(attacker);
-                            if (needRebuild) break;
+                        if (target != null && !target.isAlive() && !actedThisRound.contains(target)) {
+                            needRebuild = true;
                         }
                     }
 
-                    // If one side has no alive units, we can stop immediately.
-                    if (!hasAlive(playerArmy) || !hasAlive(computerArmy)) {
-                        return;
-                    }
+                    if (needRebuild) break;
                 }
-            } while (needRebuild);
 
-            // If nobody could perform a real attack during the entire round, stop to avoid infinite battle.
-            if (!anyEffectiveActionThisRound) {
+                if (!needRebuild) {
+                    break; // round finished without needing recalculation
+                }
+            }
+
+            // Round log (like default)
+            System.out.println();
+            System.out.println("Round " + round + " is over!");
+            System.out.println("Player army has " + countAlive(playerArmy) + " units");
+            System.out.println("Computer army has " + countAlive(computerArmy) + " units");
+            System.out.println();
+
+            // If someone died out -> battle ends after round finishes (as required)
+            if (!hasAlive(playerArmy) || !hasAlive(computerArmy)) {
+                System.out.println("Battle is over!");
+                return;
+            }
+
+            // Stalemate: nobody can perform a meaningful move (no targets / no reachable targets)
+            if (!progressThisRound) {
+                System.out.println("Battle is over!");
                 return;
             }
         }
+
+        System.out.println("Battle is over!");
     }
 
-    private Unit unitAttack(Unit attacker) throws InterruptedException {
-        Unit target = attacker.getProgram().attack();
+    private static final class AttackBuckets {
+        // baseAttack -> units with this baseAttack (descending)
+        private final TreeMap<Integer, ArrayDeque<Unit>> buckets =
+                new TreeMap<>(Comparator.reverseOrder());
 
-        if (printBattleLog != null) {
-            printBattleLog.printBattleLog(attacker, target);
-        } else {
-            // Fallback: should not happen in the actual game, but keeps runtime safe in tests/debug
-            System.out.println(
-                    "ATTACK: " + (attacker == null ? "null" : attacker.getName()) +
-                            " -> " + (target == null ? "null" : target.getName())
-            );
+        void add(Unit u) {
+            buckets.computeIfAbsent(u.getBaseAttack(), k -> new ArrayDeque<>()).addLast(u);
         }
 
-        return target;
+        boolean isEmpty() {
+            return buckets.isEmpty();
+        }
+
+        Unit pollNextAliveNotActed(HashSet<Unit> actedThisRound) {
+            while (!buckets.isEmpty()) {
+                Map.Entry<Integer, ArrayDeque<Unit>> e = buckets.firstEntry();
+                ArrayDeque<Unit> q = e.getValue();
+
+                while (!q.isEmpty()) {
+                    Unit u = q.pollFirst();
+                    if (u != null && u.isAlive() && !actedThisRound.contains(u)) {
+                        return u;
+                    }
+                }
+
+                buckets.pollFirstEntry();
+            }
+            return null;
+        }
     }
 
-    /**
-     * Checks if army has at least one alive unit
-     */
+    private AttackBuckets buildBuckets(Army army, HashSet<Unit> actedThisRound) {
+        AttackBuckets b = new AttackBuckets();
+        List<Unit> units = (army == null ? null : army.getUnits());
+        if (units == null) return b;
+
+        for (Unit u : units) {
+            if (u == null) continue;
+            if (!u.isAlive()) continue;
+            if (actedThisRound.contains(u)) continue;
+            b.add(u);
+        }
+        return b;
+    }
+
     private boolean hasAlive(Army army) {
         if (army == null || army.getUnits() == null) return false;
         for (Unit u : army.getUnits()) {
             if (u != null && u.isAlive()) return true;
         }
         return false;
+    }
+
+    private int countAlive(Army army) {
+        if (army == null || army.getUnits() == null) return 0;
+        int cnt = 0;
+        for (Unit u : army.getUnits()) {
+            if (u != null && u.isAlive()) cnt++;
+        }
+        return cnt;
+    }
+
+    private void log(Unit attacker, Unit target) {
+        // Required by the task. Keep safe against missing injection.
+        if (printBattleLog != null) {
+            printBattleLog.printBattleLog(attacker, target);
+        } else {
+            System.out.println("ATTACK: " + (attacker == null ? "null" : attacker.getName())
+                    + " -> " + (target == null ? "null" : target.getName()));
+        }
     }
 }

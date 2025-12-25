@@ -4,69 +4,58 @@ import com.battle.heroes.army.Unit;
 import com.battle.heroes.army.programs.SuitableForAttackUnitsFinder;
 
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.List;
 
 public class SuitableForAttackUnitsFinderImpl implements SuitableForAttackUnitsFinder {
 
+    private static final int HEIGHT = 21;
+
     @Override
     public List<Unit> getSuitableUnits(List<List<Unit>> unitsByRow, boolean isLeftArmyTarget) {
-        // Optimized version of the default logic.
-        //
-        // unitsByRow contains 3 columns of the TARGET army units:
-        //   - for right-side army: x = 24..26 (passed as 3 lists)
-        //   - for left-side army:  x = 0..2   (passed as 3 lists)
-        //
-        // A unit is suitable if it is NOT blocked by an alive unit in the adjacent column
-        // closer to the attacker on the same y-coordinate.
-        //
-        // Important: the default checks ONLY the immediate neighbor column, not "any unit in front".
-        // This allows back-column units to be targetable when the middle column is empty at that y.
+        // Non-default approach: BitSet visibility masks.
+        // Semantics matches the task/default idea:
+        // - 3 columns of the target side.
+        // - Front column always visible.
+        // - Middle column visible if front has no alive unit with same y.
+        // - Back column visible if middle has no alive unit with same y.
+        // Important: ONLY immediate neighbor blocks (not "any unit in front").
 
         ArrayList<Unit> result = new ArrayList<>();
-        if (unitsByRow == null || unitsByRow.isEmpty()) {
+        if (unitsByRow == null || unitsByRow.size() != 3) {
             System.out.println("Unit can not find target for attack!");
             return result;
         }
 
-        // HEIGHT is 21 => y in [0..20]
-        boolean[] prevColAliveY = new boolean[21];
+        int frontIdx = isLeftArmyTarget ? 2 : 0;
+        int midIdx = 1;
+        int backIdx = isLeftArmyTarget ? 0 : 2;
 
-        // Determine scan direction:
-        // - If target is the left army, attacker is on the right => front column is index 2, then 1, then 0.
-        // - If target is the right army, attacker is on the left => front column is index 0, then 1, then 2.
-        int startCol = isLeftArmyTarget ? unitsByRow.size() - 1 : 0;
-        int step = isLeftArmyTarget ? -1 : 1;
+        List<Unit> front = unitsByRow.get(frontIdx);
+        List<Unit> mid = unitsByRow.get(midIdx);
+        List<Unit> back = unitsByRow.get(backIdx);
 
-        for (int col = startCol; col >= 0 && col < unitsByRow.size(); col += step) {
-            List<Unit> columnUnits = unitsByRow.get(col);
-            if (columnUnits == null || columnUnits.isEmpty()) {
-                // Even if the column is empty, it still affects blocking for the next column:
-                // empty column => no y is blocked by it.
-                prevColAliveY = new boolean[21];
-                continue;
+        BitSet frontAliveY = buildAliveY(front);
+        BitSet midAliveY = buildAliveY(mid);
+
+        for (Unit u : safe(front)) {
+            if (u != null && u.isAlive()) result.add(u);
+        }
+
+        for (Unit u : safe(mid)) {
+            if (u == null || !u.isAlive()) continue;
+            int y = u.getyCoordinate();
+            if (y >= 0 && y < HEIGHT && !frontAliveY.get(y)) {
+                result.add(u);
             }
+        }
 
-            // Collect alive y in the current column (for the next iteration)
-            boolean[] currentColAliveY = new boolean[21];
-
-            boolean isFrontColumn = (col == startCol);
-
-            for (Unit u : columnUnits) {
-                if (u == null || !u.isAlive()) continue;
-
-                int y = u.getyCoordinate();
-                if (y < 0 || y >= 21) continue;
-
-                currentColAliveY[y] = true;
-
-                // Front column units are always suitable.
-                // Back columns: suitable only if NOT blocked by an alive unit in the previous (front-neighbor) column.
-                if (isFrontColumn || !prevColAliveY[y]) {
-                    result.add(u);
-                }
+        for (Unit u : safe(back)) {
+            if (u == null || !u.isAlive()) continue;
+            int y = u.getyCoordinate();
+            if (y >= 0 && y < HEIGHT && !midAliveY.get(y)) {
+                result.add(u);
             }
-
-            prevColAliveY = currentColAliveY;
         }
 
         if (result.isEmpty()) {
@@ -74,5 +63,20 @@ public class SuitableForAttackUnitsFinderImpl implements SuitableForAttackUnitsF
         }
 
         return result;
+    }
+
+    private BitSet buildAliveY(List<Unit> units) {
+        BitSet bs = new BitSet(HEIGHT);
+        if (units == null) return bs;
+        for (Unit u : units) {
+            if (u == null || !u.isAlive()) continue;
+            int y = u.getyCoordinate();
+            if (y >= 0 && y < HEIGHT) bs.set(y);
+        }
+        return bs;
+    }
+
+    private List<Unit> safe(List<Unit> units) {
+        return units == null ? List.of() : units;
     }
 }
