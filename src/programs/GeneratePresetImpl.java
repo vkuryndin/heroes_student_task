@@ -77,7 +77,7 @@ import java.util.Random;
  *       copying template stats.</li>
  *   <li>Templates with non-positive cost are ignored.</li>
  *   <li>All units are placed in x=[0..2], y=[0..20].</li>
- *   <li>Console logs are produced to match expected debug output in the runtime environment.</li>
+ *   <li>Console logs are produced to match the expected debug output in the runtime environment.</li>
  * </ul>
  */
 public class GeneratePresetImpl implements GeneratePreset {
@@ -197,7 +197,7 @@ public class GeneratePresetImpl implements GeneratePreset {
      *
      * @param byType       map of unitType -> list of templates
      * @param maxPoints    points budget
-     * @param rnd          shared random generator for coordinate probing and tie-breaking
+     * @param rnd          shared random generator for coordinate probing and tiebreaking
      * @param attemptIndex restart index (used as part of deterministic jitter)
      * @return candidate result for this restart
      */

@@ -10,7 +10,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Computes a shortest path on the battlefield grid from an attacker to a target.
+ * Computes the shortest path on the battlefield grid from an attacker to a target.
  *
  * <h2>Purpose</h2>
  * This class implements {@link UnitTargetPathFinder} required by the game engine.
@@ -32,7 +32,7 @@ import java.util.List;
  * <h2>Movement rules</h2>
  * <ul>
  *   <li>Moves are allowed in 8 directions (4 orthogonal + 4 diagonal).</li>
- *   <li>Each move has uniform cost (1 step), therefore BFS yields shortest path by number of steps.</li>
+ *   <li>Each move has a uniform cost (1 step), therefore, BFS yields the shortest path by number of steps.</li>
  *   <li>Alive units (except the attacker and the target) are treated as blocked cells (obstacles).</li>
  *   <li>The target cell is always allowed even if it is "occupied" by the target unit.</li>
  *   <li>No "corner-cutting" checks are applied for diagonals (i.e., diagonal move is allowed even if
@@ -92,7 +92,7 @@ public class UnitTargetPathFinderImpl implements UnitTargetPathFinder {
     };
 
     /**
-     * Finds a shortest path from {@code attackUnit} to {@code targetUnit} on the grid.
+     * Finds the shortest path from {@code attackUnit} to {@code targetUnit} on the grid.
      *
      * <p>Alive units from {@code existingUnitList} are treated as obstacles, except for the attacker and the target.
      * The resulting path includes the start cell and the target cell.</p>

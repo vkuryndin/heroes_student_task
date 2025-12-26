@@ -45,7 +45,7 @@ import java.util.Set;
  * reach a target (path not found). The original specification does not mention returning self, so this implementation
  * treats {@code target == attacker} as {@code null} (i.e., "no target").
  *
- * <p>For the purpose of deciding whether an army is "capable of making a move", this implementation tracks if during
+ * <p>To decide whether an army is "capable of making a move", this implementation tracks if during
  * the whole round at least one unit from that side returned a non-null target (a meaningful action happened).</p>
  *
  * <h2>Logging</h2>
@@ -75,7 +75,7 @@ public class SimulateBattleImpl implements SimulateBattle {
     /**
      * Battle logger.
      *
-     * <p>In the actual game, this field is usually injected by the engine.
+     * <p>In the actual game, the engine usually injects this field.
      * For safety, if it is {@code null}, a fallback implementation is used.</p>
      */
     private PrintBattleLog printBattleLog;
@@ -175,6 +175,7 @@ public class SimulateBattleImpl implements SimulateBattle {
                     if (target != null) {
                         computerHasMovesThisRound = true;
 
+                        // Rebuilds queue if target died this round
                         if (!target.isAlive() && !actedThisRound.contains(target)) {
                             if (playerSide.contains(target)) {
                                 pQ = buildQueue(playerArmy, actedThisRound);
