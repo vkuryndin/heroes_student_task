@@ -10,15 +10,111 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
+/**
+ * Generates a preset (composition) of the computer army under a points budget.
+ *
+ * <h2>Goal</h2>
+ * Build an {@link Army} that:
+ * <ul>
+ *   <li>Does not exceed {@code maxPoints} total cost.</li>
+ *   <li>Respects the per-type cap: at most {@value #MAX_PER_TYPE} units for each {@link Unit#getUnitType()}.</li>
+ *   <li>Places each generated unit onto a 3x21 grid (x in [0..2], y in [0..20]) without collisions.</li>
+ *   <li>Prioritizes effectiveness primarily by {@code attack/cost} ratio and secondarily by {@code health/cost} ratio.</li>
+ * </ul>
+ *
+ * <h2>High-level idea (algorithm)</h2>
+ * This implementation uses a <b>multi-start greedy</b> strategy:
+ * <ol>
+ *   <li><b>Group templates by unit type</b> (future-proof: supports multiple templates per type).</li>
+ *   <li>Run a fixed number of independent greedy constructions (restarts).</li>
+ *   <li>For each restart, repeatedly pick the next unit template that maximizes a weighted key:
+ *     <ul>
+ *       <li>Primary weight: {@code attack/cost} (dominant term).</li>
+ *       <li>Secondary weight: {@code health/cost}.</li>
+ *       <li>A small diversity factor to avoid choosing only one type when several types have comparable efficiency.</li>
+ *       <li>A tiny deterministic+random jitter to break ties and produce non-identical compositions across restarts.</li>
+ *     </ul>
+ *   </li>
+ *   <li>After the greedy pass, perform a <b>fill pass</b> that tries to spend the remaining points by adding
+ *       the cheapest units that still fit (tie-broken by efficiency). This improves budget usage and unit count.</li>
+ *   <li>Pick the best candidate among restarts using a deterministic {@code score} function based on the same
+ *       priorities (attack-per-cost first, health-per-cost second).</li>
+ * </ol>
+ *
+ * <h2>Why multi-start?</h2>
+ * A single greedy pass can get stuck in locally good choices (especially if several templates have similar ratios).
+ * Performing several restarts with minor randomized tie-breaking explores multiple near-greedy compositions while
+ * keeping complexity bounded and predictable.
+ *
+ * <h2>Coordinate placement</h2>
+ * Each created unit receives unique coordinates in a 3x21 grid:
+ * <ul>
+ *   <li>Random probing first (bounded attempts).</li>
+ *   <li>Deterministic scan as a fallback, guaranteeing placement if any cell is free.</li>
+ * </ul>
+ * Additionally, the first chosen row {@code firstY} is avoided for some early random attempts to reduce the chance
+ * of clustering many units on the same y-coordinate (a UI/visualization edge case).
+ *
+ * <h2>Complexity</h2>
+ * Let:
+ * <ul>
+ *   <li>{@code m} be the number of unit types.</li>
+ *   <li>{@code n} be the maximum number of units in the army.</li>
+ * </ul>
+ * The algorithm performs a constant number of restarts {@value #RESTARTS}. In each restart, the greedy loop adds
+ * up to {@code n} units; each addition scans the available types and templates (effectively {@code O(m)} for the
+ * current game where each type typically has one template). Therefore:
+ * <ul>
+ *   <li>Per restart: {@code O(m * n)}</li>
+ *   <li>Total: {@code O(RESTARTS * m * n)} which is {@code O(m * n)} because {@value #RESTARTS} is a constant.</li>
+ * </ul>
+ * Coordinate selection is bounded by constants (3x21 grid and fixed attempt limits), so it does not change the
+ * asymptotic complexity.
+ *
+ * <h2>Notes / assumptions</h2>
+ * <ul>
+ *   <li>This class treats the incoming {@code unitList} as a set of templates and creates new {@link Unit} objects
+ *       copying template stats.</li>
+ *   <li>Templates with non-positive cost are ignored.</li>
+ *   <li>All units are placed in x=[0..2], y=[0..20].</li>
+ *   <li>Console logs are produced to match expected debug output in the runtime environment.</li>
+ * </ul>
+ */
 public class GeneratePresetImpl implements GeneratePreset {
 
+    /** Maximum number of units allowed per unit type. */
     private static final int MAX_PER_TYPE = 11;
-    private static final int GRID_W = 3;   // x: 0..2
-    private static final int GRID_H = 21;  // y: 0..20
 
-    // Constant number of attempts -> keeps O(m*n) when m=types, n=max units.
+    /** Grid width (x: 0..2). */
+    private static final int GRID_W = 3;
+
+    /** Grid height (y: 0..20). */
+    private static final int GRID_H = 21;
+
+    /**
+     * Fixed number of greedy restarts.
+     * A constant value keeps overall complexity {@code O(m*n)}.
+     */
     private static final int RESTARTS = 20;
 
+    /**
+     * Generates the computer army preset under the points constraint.
+     *
+     * <p>The method selects the best candidate from {@value #RESTARTS} greedy restarts.
+     * Each restart builds an army by repeatedly choosing the best next unit according to a weighted efficiency key,
+     * then performs a fill pass to use remaining points.</p>
+     *
+     * <p>Logs:
+     * <ul>
+     *   <li>{@code "Added i unit"} is printed for each unit in the final selected army.</li>
+     *   <li>{@code "Used points: X"} is printed once at the end.</li>
+     * </ul>
+     * </p>
+     *
+     * @param unitList  list of unit templates; typically contains one template per unit type
+     * @param maxPoints maximum total cost allowed for the resulting army
+     * @return generated {@link Army} for the computer side (may be empty if no unit fits)
+     */
     @Override
     public Army generate(List<Unit> unitList, int maxPoints) {
         // Non-default approach:
@@ -68,6 +164,10 @@ public class GeneratePresetImpl implements GeneratePreset {
         return bestArmy;
     }
 
+    /**
+     * Immutable result of a single restart build attempt.
+     * Stores the built army, points used, and an aggregated score for comparison.
+     */
     private static final class BuildResult {
         final Army army;
         final int usedPoints;
@@ -80,6 +180,27 @@ public class GeneratePresetImpl implements GeneratePreset {
         }
     }
 
+    /**
+     * Builds one candidate army using a greedy pass followed by a fill pass.
+     *
+     * <h3>Greedy pass</h3>
+     * Repeatedly selects the best next template among all types that:
+     * <ul>
+     *   <li>still have capacity (< {@value #MAX_PER_TYPE} units),</li>
+     *   <li>fit into the remaining points budget,</li>
+     *   <li>maximize the weighted key based on attack/cost, health/cost, and mild diversity.</li>
+     * </ul>
+     *
+     * <h3>Fill pass</h3>
+     * Attempts to spend remaining points by picking the cheapest unit that fits (tie-broken by attack efficiency),
+     * still respecting per-type limits and free coordinates.
+     *
+     * @param byType       map of unitType -> list of templates
+     * @param maxPoints    points budget
+     * @param rnd          shared random generator for coordinate probing and tie-breaking
+     * @param attemptIndex restart index (used as part of deterministic jitter)
+     * @return candidate result for this restart
+     */
     private BuildResult buildCandidate(Map<String, List<Unit>> byType, int maxPoints, Random rnd, int attemptIndex) {
         Army army = new Army();
 
@@ -205,6 +326,7 @@ public class GeneratePresetImpl implements GeneratePreset {
                 }
             }
 
+            // Adds best unit to army if possible
             if (bestFill != null) {
                 int[] xy = findAvailableCoordinates(occupied, rnd, firstY);
                 if (xy == null) break;
@@ -242,6 +364,19 @@ public class GeneratePresetImpl implements GeneratePreset {
         return new BuildResult(army, usedPoints, totalScore);
     }
 
+    /**
+     * Converts a unit template into a comparable long score that reflects the preference order:
+     * <ol>
+     *   <li>maximize {@code attack/cost}</li>
+     *   <li>then maximize {@code health/cost}</li>
+     * </ol>
+     *
+     * <p>The score is additive across selected units. Scaling factors preserve ordering and reduce the risk
+     * of losing precision when using integer arithmetic.</p>
+     *
+     * @param u unit template
+     * @return weighted score
+     */
     private long scoreUnit(Unit u) {
         // Additive integer-ish score; consistent with "attack/cost first, health/cost second".
         int c = u.getCost();
@@ -250,6 +385,23 @@ public class GeneratePresetImpl implements GeneratePreset {
         return atkRatio * 1_000_000_000L + hpRatio;
     }
 
+    /**
+     * Finds a free coordinate cell in the 3x21 preset placement grid.
+     *
+     * <p>Strategy:
+     * <ol>
+     *   <li>Try up to 300 random samples.</li>
+     *   <li>If sampling fails, do a deterministic scan to find the first free cell.</li>
+     * </ol>
+     *
+     * <p>To avoid early clustering, if {@code firstY} is already selected, the method temporarily avoids choosing
+     * that same y-coordinate for some of the early random attempts.</p>
+     *
+     * @param occupied grid of already used cells
+     * @param rnd      random generator
+     * @param firstY   y-coordinate of the first placed unit in this candidate (may be null)
+     * @return int array {@code [x, y]} if a cell is found, otherwise {@code null}
+     */
     private int[] findAvailableCoordinates(boolean[][] occupied, Random rnd, Integer firstY) {
         for (int attempt = 0; attempt < 300; attempt++) {
             int y = rnd.nextInt(GRID_H);
