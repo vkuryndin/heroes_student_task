@@ -202,7 +202,7 @@ public class SimulateBattleImpl implements SimulateBattle {
 
             // End condition: one side has no alive units capable of making a meaningful move.
             // We interpret "capable" as: at least one unit returned a non-null target during the round.
-            if (!playerHasMovesThisRound || !computerHasMovesThisRound) {
+            if (!playerHasMovesThisRound && !computerHasMovesThisRound) {
                 System.out.println("Battle is over!");
                 return;
             }

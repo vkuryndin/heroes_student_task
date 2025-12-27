@@ -43,7 +43,7 @@ import java.util.Random;
  *
  * <h2>Why multi-start?</h2>
  * A single greedy pass can get stuck in locally good choices (especially if several templates have similar ratios).
- * Performing several restarts with minor randomized tie-breaking explores multiple near-greedy compositions while
+ * Performing several restarts with minor randomized tiebreaking explores multiple near-greedy compositions while
  * keeping complexity bounded and predictable.
  *
  * <h2>Coordinate placement</h2>
