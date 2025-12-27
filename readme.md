@@ -172,7 +172,7 @@ Bidirectional BFS на практике обходит меньше клеток
 ---
 ## Как собрать JAR
 
-Сборка в IntelliJ IDEA:
+### Вариант 1. Сборка в IntelliJ IDEA:
 
 1. `File → Project Structure → Artifacts`
 2. `+ → JAR → From modules with dependencies`
@@ -180,6 +180,20 @@ Bidirectional BFS на практике обходит меньше клеток
 
 Далее полученный артефакт можно подложить в папку jars проекта Heroes.
 
+### Вариант 2: Gradle (рекомендуется)
+
+Сборка `obf.jar` одной командой из корня проекта:
+
+    bash ./gradlew clean jar
+
+Результат появится здесь:
+
+    build/libs/obf.jar`
+
+Скопируйте `build/libs/obf.jar` в папку игры `heroes/jars` под именем `obf.jar`.
+
+> **Важно:** библиотека игры из папки `libs/` используется только для компиляции (`compileOnly`) и не упаковывается внутрь `obf.jar`.  
+> Итоговый `obf.jar` содержит только классы из пакета `programs/*` (реализацию интерфейсов игры).
 ---
 ## Тесты
 
