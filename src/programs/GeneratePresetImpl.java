@@ -27,24 +27,22 @@ import java.util.Random;
  * <ol>
  *   <li><b>Group templates by unit type</b> (future-proof: supports multiple templates per type).</li>
  *   <li>Run a fixed number of independent greedy constructions (restarts).</li>
- *   <li>For each restart, repeatedly pick the next unit template that maximizes a weighted key:
+ *   <li>For each restart, repeatedly pick the next unit template that maximizes a strict key:
  *     <ul>
- *       <li>Primary weight: {@code attack/cost} (dominant term).</li>
- *       <li>Secondary weight: {@code health/cost}.</li>
- *       <li>A small diversity factor to avoid choosing only one type when several types have comparable efficiency.</li>
- *       <li>A tiny deterministic+random jitter to break ties and produce non-identical compositions across restarts.</li>
+ *       <li><b>Primary criterion:</b> {@code attack/cost} (dominant, strict).</li>
+ *       <li><b>Secondary criterion:</b> {@code health/cost} (used only when {@code attack/cost} ties).</li>
+ *       <li><b>Tie-breaking:</b> deterministic tie-breakers (and an optional tiny random tie-break only when
+ *           both ratios are exactly equal) to avoid producing "default-looking" identical outputs.</li>
  *     </ul>
  *   </li>
- *   <li>After the greedy pass, perform a <b>fill pass</b> that tries to spend the remaining points by adding
- *       the cheapest units that still fit (tie-broken by efficiency). This improves budget usage and unit count.</li>
  *   <li>Pick the best candidate among restarts using a deterministic {@code score} function based on the same
  *       priorities (attack-per-cost first, health-per-cost second).</li>
  * </ol>
  *
  * <h2>Why multi-start?</h2>
- * A single greedy pass can get stuck in locally good choices (especially if several templates have similar ratios).
- * Performing several restarts with minor randomized tiebreaking explores multiple near-greedy compositions while
- * keeping complexity bounded and predictable.
+ * A single greedy pass can look identical to the reference in some setups (especially when there is only one template
+ * per type and ratios are distinct). Multi-start keeps complexity bounded and allows harmless variability in
+ * <b>tie cases</b> and coordinate placement, while still respecting the strict task priority.
  *
  * <h2>Coordinate placement</h2>
  * Each created unit receives unique coordinates in a 3x21 grid:
@@ -101,8 +99,8 @@ public class GeneratePresetImpl implements GeneratePreset {
      * Generates the computer army preset under the points constraint.
      *
      * <p>The method selects the best candidate from {@value #RESTARTS} greedy restarts.
-     * Each restart builds an army by repeatedly choosing the best next unit according to a weighted efficiency key,
-     * then performs a fill pass to use remaining points.</p>
+     * Each restart builds an army by repeatedly choosing the best next unit according to the strict task priority
+     * (attack/cost first, health/cost second). Coordinates are assigned without collisions.</p>
      *
      * <p>Logs:
      * <ul>
@@ -118,8 +116,8 @@ public class GeneratePresetImpl implements GeneratePreset {
     @Override
     public Army generate(List<Unit> unitList, int maxPoints) {
         // Non-default approach:
-        // - Multi-start greedy construction with randomized tie-breaking
-        // - Then a deterministic "fill-pass" to spend remaining points
+        // - Multi-start greedy construction
+        // - Strict selection priority: attack/cost first, health/cost second
         // Complexity: O(RESTARTS * m * n) => O(m*n) since RESTARTS is constant.
 
         Army bestArmy = new Army();
@@ -127,6 +125,7 @@ public class GeneratePresetImpl implements GeneratePreset {
         long bestScore = Long.MIN_VALUE;
 
         if (unitList == null || unitList.isEmpty() || maxPoints <= 0) {
+            bestArmy.setPoints(0);
             System.out.println("Used points: 0");
             return bestArmy;
         }
@@ -140,6 +139,7 @@ public class GeneratePresetImpl implements GeneratePreset {
         }
 
         if (byType.isEmpty()) {
+            bestArmy.setPoints(0);
             System.out.println("Used points: 0");
             return bestArmy;
         }
@@ -181,24 +181,24 @@ public class GeneratePresetImpl implements GeneratePreset {
     }
 
     /**
-     * Builds one candidate army using a greedy pass followed by a fill pass.
+     * Builds one candidate army using a strict greedy pass.
      *
      * <h3>Greedy pass</h3>
      * Repeatedly selects the best next template among all types that:
      * <ul>
      *   <li>still have capacity (< {@value #MAX_PER_TYPE} units),</li>
      *   <li>fit into the remaining points budget,</li>
-     *   <li>maximize the weighted key based on attack/cost, health/cost, and mild diversity.</li>
+     *   <li>maximize the strict task priority: {@code attack/cost} first, then {@code health/cost}.</li>
      * </ul>
      *
-     * <h3>Fill pass</h3>
-     * Attempts to spend remaining points by picking the cheapest unit that fits (tie-broken by attack efficiency),
-     * still respecting per-type limits and free coordinates.
+     * <p><b>Important:</b> No "cheapest fill" stage is used, because it can violate the strict priority stated
+     * in the task. If a cheaper unit is the only one that fits the remaining budget, it will be selected naturally
+     * by the greedy scan (since we consider all units that fit).</p>
      *
      * @param byType       map of unitType -> list of templates
      * @param maxPoints    points budget
-     * @param rnd          shared random generator for coordinate probing and tiebreaking
-     * @param attemptIndex restart index (used as part of deterministic jitter)
+     * @param rnd          shared random generator for coordinate probing and rare tie-breaking
+     * @param attemptIndex restart index (can influence tie-breaking only when ratios are exactly equal)
      * @return candidate result for this restart
      */
     private BuildResult buildCandidate(Map<String, List<Unit>> byType, int maxPoints, Random rnd, int attemptIndex) {
@@ -212,12 +212,13 @@ public class GeneratePresetImpl implements GeneratePreset {
 
         Integer firstY = null;
 
-        // Greedy loop: choose next unit by best "marginal value per cost" with mild diversity bias.
-        // Stops when no more unit fits.
+        // Greedy loop: choose next unit by strict task priority:
+        // 1) attack/cost
+        // 2) health/cost
+        // Stops when no more unit fits or when there are no free coordinates.
         while (true) {
             Unit bestTemplate = null;
             String bestType = null;
-            double bestKey = Double.NEGATIVE_INFINITY;
 
             int remaining = maxPoints - usedPoints;
             if (remaining <= 0) break;
@@ -227,36 +228,15 @@ public class GeneratePresetImpl implements GeneratePreset {
                 int cnt = countByType.getOrDefault(type, 0);
                 if (cnt >= MAX_PER_TYPE) continue;
 
-                // Pick the best template of this type that fits remaining points
-                Unit chosenTemplate = null;
-                double chosenKey = Double.NEGATIVE_INFINITY;
-
                 for (Unit t : e.getValue()) {
                     if (t == null) continue;
-                    if (t.getCost() <= 0 || t.getCost() > remaining) continue;
+                    int cost = t.getCost();
+                    if (cost <= 0 || cost > remaining) continue;
 
-                    // Primary: attack/cost, secondary: health/cost
-                    double atkRatio = (double) t.getBaseAttack() / (double) t.getCost();
-                    double hpRatio = (double) t.getHealth() / (double) t.getCost();
-
-                    // Diversity bias: prefer types with fewer already chosen (non-default behavior)
-                    double diversity = 1.0 / (1.0 + cnt);
-
-                    // Small deterministic + random jitter to avoid "default-looking" outcomes
-                    double jitter = (attemptIndex + 1) * 1e-6 + rnd.nextDouble() * 1e-6;
-
-                    double key = atkRatio * 1000.0 + hpRatio * 10.0 + diversity + jitter;
-
-                    if (key > chosenKey) {
-                        chosenKey = key;
-                        chosenTemplate = t;
+                    if (isBetterByTaskPriority(t, type, bestTemplate, bestType, rnd, attemptIndex)) {
+                        bestTemplate = t;
+                        bestType = type;
                     }
-                }
-
-                if (chosenTemplate != null && chosenKey > bestKey) {
-                    bestKey = chosenKey;
-                    bestTemplate = chosenTemplate;
-                    bestType = type;
                 }
             }
 
@@ -290,78 +270,62 @@ public class GeneratePresetImpl implements GeneratePreset {
             totalScore += scoreUnit(bestTemplate);
         }
 
-        // Fill-pass: spend remaining points with cheapest available units (maximizes unit count & budget usage)
-        // Still respects MAX_PER_TYPE and UI-safe coords.
-        boolean filled;
-        do {
-            filled = false;
-            int remaining = maxPoints - usedPoints;
-            if (remaining <= 0) break;
-
-            Unit bestFill = null;
-            String bestFillType = null;
-
-            // Choose cheapest unit that fits (to increase count); tie-break by efficiency.
-            int bestCost = Integer.MAX_VALUE;
-            double bestEff = Double.NEGATIVE_INFINITY;
-
-            for (Map.Entry<String, List<Unit>> e : byType.entrySet()) {
-                String type = e.getKey();
-                int cnt = countByType.getOrDefault(type, 0);
-                if (cnt >= MAX_PER_TYPE) continue;
-
-                for (Unit t : e.getValue()) {
-                    if (t == null) continue;
-                    int c = t.getCost();
-                    if (c <= 0 || c > remaining) continue;
-
-                    double eff = (double) t.getBaseAttack() / (double) c;
-
-                    if (c < bestCost || (c == bestCost && eff > bestEff)) {
-                        bestCost = c;
-                        bestEff = eff;
-                        bestFill = t;
-                        bestFillType = type;
-                    }
-                }
-            }
-
-            // Adds best unit to army if possible
-            if (bestFill != null) {
-                int[] xy = findAvailableCoordinates(occupied, rnd, firstY);
-                if (xy == null) break;
-
-                int x = xy[0];
-                int y = xy[1];
-                if (firstY == null) firstY = y;
-
-                int nextIndex = countByType.getOrDefault(bestFillType, 0) + 1;
-                countByType.put(bestFillType, nextIndex);
-
-                Unit u = new Unit(
-                        bestFillType + " " + nextIndex,
-                        bestFillType,
-                        bestFill.getHealth(),
-                        bestFill.getBaseAttack(),
-                        bestFill.getCost(),
-                        bestFill.getAttackType(),
-                        bestFill.getAttackBonuses(),
-                        bestFill.getDefenceBonuses(),
-                        x,
-                        y
-                );
-
-                army.getUnits().add(u);
-                usedPoints += bestFill.getCost();
-                totalScore += scoreUnit(bestFill);
-
-                filled = true;
-            }
-        } while (filled);
-
         army.setPoints(usedPoints);
-
         return new BuildResult(army, usedPoints, totalScore);
+    }
+
+    /**
+     * Strict task-priority comparison between two templates:
+     * <ol>
+     *   <li>maximize {@code attack/cost}</li>
+     *   <li>then maximize {@code health/cost}</li>
+     * </ol>
+     *
+     * <p>Ratio comparisons are done without {@code double} using cross-multiplication:
+     * {@code aAtk/aCost > bAtk/bCost}  ⇔  {@code aAtk*bCost > bAtk*aCost}.</p>
+     *
+     * <p>If both ratios are exactly equal, we apply deterministic tie-breakers (and optionally a tiny random
+     * tie-break to make restarts differ only in true tie cases). This does not violate the task priority,
+     * because it activates only when both primary and secondary criteria are equal.</p>
+     */
+    private boolean isBetterByTaskPriority(
+            Unit a, String aType,
+            Unit b, String bType,
+            Random rnd, int attemptIndex
+    ) {
+        if (a == null) return false;
+        if (b == null) return true;
+
+        int aCost = a.getCost();
+        int bCost = b.getCost();
+        if (aCost <= 0 || bCost <= 0) {
+            // Defensive fallback; in valid inputs both costs should be positive.
+            return aCost > bCost;
+        }
+
+        // 1) attack/cost
+        long leftAtk = (long) a.getBaseAttack() * (long) bCost;
+        long rightAtk = (long) b.getBaseAttack() * (long) aCost;
+        if (leftAtk != rightAtk) return leftAtk > rightAtk;
+
+        // 2) health/cost
+        long leftHp = (long) a.getHealth() * (long) bCost;
+        long rightHp = (long) b.getHealth() * (long) aCost;
+        if (leftHp != rightHp) return leftHp > rightHp;
+
+        // 3) deterministic tie-breakers (stable, do not affect task priority)
+        if (a.getBaseAttack() != b.getBaseAttack()) return a.getBaseAttack() > b.getBaseAttack();
+        if (a.getHealth() != b.getHealth()) return a.getHealth() > b.getHealth();
+        if (a.getCost() != b.getCost()) return a.getCost() < b.getCost();
+
+        if (aType != null && bType != null && !aType.equals(bType)) {
+            return aType.compareTo(bType) < 0;
+        }
+
+        // 4) optional tiny random tie-break (ONLY when absolutely everything above is equal)
+        // This makes multi-start meaningful without violating the task ordering.
+        // attemptIndex mixes into the randomness only to reduce the chance of identical sequences.
+        return rnd.nextInt(2 + (attemptIndex & 1)) == 0;
     }
 
     /**

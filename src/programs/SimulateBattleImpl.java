@@ -7,7 +7,6 @@ import com.battle.heroes.army.programs.SimulateBattle;
 
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.PriorityQueue;
@@ -121,20 +120,12 @@ public class SimulateBattleImpl implements SimulateBattle {
             boolean playerHasMovesThisRound = false;
             boolean computerHasMovesThisRound = false;
 
-            // Identity membership set to determine which side a killed unit belongs to.
-            Set<Unit> playerSide = Collections.newSetFromMap(new IdentityHashMap<>());
-            List<Unit> pUnits = playerArmy.getUnits();
-            if (pUnits != null) {
-                for (Unit u : pUnits) {
-                    if (u != null) playerSide.add(u);
-                }
-            }
-
-            // Build queues once per round; rebuild only the affected side when required.
+            // Build queues once per round; rebuild when required.
             PriorityQueue<Unit> pQ = buildQueue(playerArmy, actedThisRound);
             PriorityQueue<Unit> cQ = buildQueue(computerArmy, actedThisRound);
 
-            // Round processing: rebuild a queue only when a unit dies before it acted this round.
+            // Round processing: if a unit dies before it acted this round, recalculate turn queues immediately.
+            // IMPORTANT: we rebuild BOTH queues, because the overall turn order can change when unit counts differ.
             while (!pQ.isEmpty() || !cQ.isEmpty()) {
 
                 // Player turn.
@@ -152,13 +143,10 @@ public class SimulateBattleImpl implements SimulateBattle {
                     if (target != null) {
                         playerHasMovesThisRound = true;
 
-                        // If the target died and has not acted yet this round -> rebuild immediately (affected side only).
+                        // If the target died and has not acted yet this round -> rebuild queues immediately.
                         if (!target.isAlive() && !actedThisRound.contains(target)) {
-                            if (playerSide.contains(target)) {
-                                pQ = buildQueue(playerArmy, actedThisRound);
-                            } else {
-                                cQ = buildQueue(computerArmy, actedThisRound);
-                            }
+                            pQ = buildQueue(playerArmy, actedThisRound);
+                            cQ = buildQueue(computerArmy, actedThisRound);
                         }
                     }
                 }
@@ -175,13 +163,10 @@ public class SimulateBattleImpl implements SimulateBattle {
                     if (target != null) {
                         computerHasMovesThisRound = true;
 
-                        // Rebuilds queue if target died this round
+                        // If the target died and has not acted yet this round -> rebuild queues immediately.
                         if (!target.isAlive() && !actedThisRound.contains(target)) {
-                            if (playerSide.contains(target)) {
-                                pQ = buildQueue(playerArmy, actedThisRound);
-                            } else {
-                                cQ = buildQueue(computerArmy, actedThisRound);
-                            }
+                            pQ = buildQueue(playerArmy, actedThisRound);
+                            cQ = buildQueue(computerArmy, actedThisRound);
                         }
                     }
                 }
@@ -200,9 +185,13 @@ public class SimulateBattleImpl implements SimulateBattle {
                 return;
             }
 
-            // End condition: one side has no alive units capable of making a meaningful move.
-            // We interpret "capable" as: at least one unit returned a non-null target during the round.
-            if (!playerHasMovesThisRound && !computerHasMovesThisRound) {
+            // End condition: per task wording, the simulation ends when at least one army
+            // has no alive units capable of making a move.
+            // In this implementation we interpret "capable" as: during the whole round
+            // the side did not perform any meaningful action (Program.attack() returned a non-null target;
+            // target==attacker is treated as "no target").
+            // Therefore, if either side made zero meaningful moves in the round, we end the battle.
+            if (!playerHasMovesThisRound || !computerHasMovesThisRound) {
                 System.out.println("Battle is over!");
                 return;
             }
