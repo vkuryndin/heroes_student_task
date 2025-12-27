@@ -48,11 +48,15 @@ dependencies {
     testImplementation(gameLibs)
 
     // JUnit 5
-    testImplementation("org.junit.jupiter:junit-jupiter:5.11.0")
+    testImplementation(platform("org.junit:junit-bom:5.11.0"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
 
-    //  JUnit4 test
+    //  fixing "Failed to load JUnit Platform"
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+
+    // for junit 4
     testImplementation("junit:junit:4.13.2")
-    testRuntimeOnly("org.junit.vintage:junit-vintage-engine:5.11.0")
+    testRuntimeOnly("org.junit.vintage:junit-vintage-engine")
 }
 
 // Configures main and test source sets
