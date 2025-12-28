@@ -13,14 +13,36 @@
 ---
 
 ## Структура проекта
-    src/
-     programs/
-      GeneratePresetImpl.java
-      SimulateBattleImpl.java
-      SuitableForAttackUnitsFinderImpl.java
-      UnitTargetPathFinderImpl.java
+
+    heroes_student_task/
+    ├── build.gradle.kts                   # Конфигурация сборки проекта (Kotlin DSL)
+    ├── settings.gradle.kts                # Настройки проекта
+    ├── gradlew                            # Скрипт запуска Gradle (Unix)
+    ├── gradlew.bat                        # Скрипт запуска Gradle (Windows)
+    ├── .gitignore                         # Исключения для Git
+    ├── readme.md                          # Документация проекта
+    ├── obf.jar                            # Итоговый собранный артефакт
+    └── src/
+        └── programs/                                # Исходный код и тесты
+           ├── GeneratePresetImpl.java                    # Реализация: Генерация армии
+           ├── GeneratePresetImplTest.java                # Тесты: Базовые сценарии генерации
+           ├── GeneratePresetImplExtraTest.java           # Тесты: Дополнительные проверки генерации
+           ├── GeneratePresetLogicTest.java               # Тесты: Логика подбора юнитов
+           ├── SimulateBattleImpl.java                    # Реализация: Симуляция боя
+           ├── SimulateBattleImplTest.java                # Тесты: Базовая механика боя
+           ├── SimulateBattleImplGapsTest.java            # Тесты: Граничные случаи (смерть до хода, тупики)
+           ├── SimulateBattleOrderTest.java               # Тесты: Проверка порядка ходов
+           ├── SuitableForAttackUnitsFinderImpl.java      # Реализация: Выбор целей
+           ├── SuitableForAttackUnitsFinderImplTest.java  # Тесты: Базовый поиск целей
+           ├── SuitableForAttackUnitsFinderImplExtraTest.java # Тесты: Сложные ситуации маскировки
+           ├── UnitTargetPathFinderImpl.java              # Реализация: Поиск пути
+           ├── UnitTargetPathFinderImplTest.java          # Тесты: Базовый поиск пути
+           ├── UnitTargetPathFinderImplExtraTest.java     # Тесты: Дополнительные маршруты
+           └── UnitTargetPathFinderComplexTest.java       # Тесты: Сложные препятствия и лабиринты
 
 Собранный артефакт (JAR) также добавлен в репозиторий — его можно подложить в папку игры `heroes/jars` под именем `obf.jar`.
+
+---
 
 ## Реализованные алгоритмы
 
@@ -56,12 +78,12 @@
 
 Итого: **`O(T log T + n log T)`**, что **быстрее**, чем `O(m·n)` при типичных входных данных и формально лучше пересканирования всех типов на каждом шаге.
 
-**Улучшение относительно базовой реализации:**
-В базовой реализации обычно встречается:
+**Улучшение относительно обычных реализаций (на основе проведенного исследования):**
+В обычных реализациях встречается:
 - пересканирование всех типов/шаблонов на каждом шаге → `O(m·n)`,
 - и/или проверка занятости клетки через `stream().anyMatch(...)` по растущему списку уже размещённых юнитов, что может давать суммарно **`O(n²)`**.
 
-В текущей реализации:
+В моей реализации:
 - выбор кандидата ускорен за счёт `TreeSet` + монотонной фильтрации по бюджету (без полного пересканирования типов на каждом шаге),
 - проверка занятости клетки выполняется через boolean-матрицу фиксированного размера (3×21), поэтому **O(1)**, а fallback-сканирование — константа (≤ 63 клетки).
 
